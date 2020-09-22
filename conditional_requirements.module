@@ -1,0 +1,993 @@
+<?php
+/**
+ * @file
+ * 
+ * This is the primary module file for the Conditional Requirements module.
+*/
+
+
+
+/**
+ * implements hook_menu
+ */
+function conditional_requirements_menu() {
+  
+  $items = array();
+  
+  
+  $items["admin/config/cond-requirements"] = array(
+    "title" => "Conditional Requirements settings",
+    "description" => "Configure settings related to the conditional requirements module.",
+    "page_callback" => "fp_render_form",
+    "page_arguments" => array("conditional_requirements_settings_form", "system_settings"),
+    "access_arguments" => array("administer_conditional_requirements"),
+    "page_settings" => array(
+      "page_has_search" => FALSE,
+      "menu_links" => array(         
+        0 => array(
+          "text" => "Back to main menu",
+          "path" => "admin-tools/admin",
+          "query" => "de_catalog_year=%DE_CATALOG_YEAR%",
+        ),
+      ),
+    ),    
+    "type" => MENU_TYPE_NORMAL_ITEM,
+    "tab_parent" => "admin-tools/admin",        
+  );
+  
+  
+  
+  return $items;
+  
+}
+
+
+
+
+/**
+ * implements hook_perm
+ */
+function conditional_requirements_perm() {
+  return array(
+    "administer_conditional_requirements" => array(
+      "title" => t("Administer conditional requirements module"),
+      "description" => t("Configure settings relating to the conditional requirements module."),
+    ),
+  );
+}
+
+
+
+function conditional_requirements_settings_form() {
+  $form = array();
+  
+  $form['mark_top'] = array(
+    'value' => t("The values on this settings screen will affect how the Conditional Requirements
+                  module operates, and how it interprets instructions.  If you need
+                  help with syntax and operations, please see this documentation page:
+                  <a href='http://getflightpath.com/node/1180' target='_blank'>http://getflightpath.com/node/1180</a>."),
+  );
+  
+  
+  $form['conditional_requirements_current_term'] = array(
+    'label' => t('Enter the current term on campus:'),
+    'type' => 'textfield',
+    'value' => variable_get('conditional_requirements_current_term', '2000F'),
+    'description' => t('This value will be used in calculations performed by the
+                        codnitional requirements module.  It should be updated as the
+                        actual term "on campus" changes, or however often you wish to in order for the
+                        Conditional Requirements module to function as desired.
+                        <br><br>If you wish to update it
+                        via routine, look for its entry in the <em>variables</em> table (value must be serialized).'),
+  );
+  
+  
+  return $form;
+}
+
+
+
+
+
+
+
+
+
+
+/**
+ * implements hook_form_alter
+ */
+function conditional_requirements_form_alter(&$form, $form_id) {
+  
+  
+  
+  if ($form_id == "admin_edit_degree_form") {
+    // We are on the degree edit form.  We'd like to add in our section for conditional requirements
+    // at the bottom of each semester block.
+    
+    $degree_id = $form['degree_id']['value'];
+    $creqs = conditional_requirements_get_conditional_requirements_for_degree($degree_id, TRUE);
+    
+    
+    $creqs_by_semester = array();
+    // Go through our creqs, and get all of the lines for each semester block.
+    foreach ($creqs as $k => $cur) {
+      @$creqs_by_semester[$cur['semester_num']] .= $cur['original_cr_line'] . "\n";
+    }
+    
+    
+      
+    foreach ($form as $key => $val) {
+      // Looking for elements which look like: semester_X_table_bottom_markup
+      if (strstr($key, "semester_") && strstr($key, "_table_bottom_markup")) {
+        // Find out the semester num.
+        $temp = explode("_", $key);
+        $semester_num = $temp[1];
+
+        $cr_default_value = "";
+        if (isset($creqs_by_semester[$semester_num])) {
+          $cr_default_value = $creqs_by_semester[$semester_num];
+        }
+
+
+        // We want to place our new field within the HTML table for this semester block,
+        // so, find out the weight, then subtract.
+        $new_weight = $val['weight'] - 2;
+        
+        // We can now add our element.
+        $form['conditional_requirements_' . $semester_num] = array(
+          'label' => t('Conditional Requirements:'),
+          'type' => 'textarea',
+          'rows' => 4,
+          'description' => t('This is provided by the Conditional Requirements module.  <a href="http://getflightpath.com/node/1180" target="_blank">See available options & syntax</a> (opens in new window).'),
+          'weight' => $new_weight,
+          'value' => $cr_default_value, 
+          'prefix' => "<tr><td colspan='2'>",
+          'suffix' => "</td></tr>",
+        );
+        
+      }
+    }
+    
+    // Add an additional validate & submit handler for Conditional Requirements
+    $form['#validate_handlers'][] = "conditional_requirements_edit_degree_form_validate";
+    $form['#submit_handlers'][] = "conditional_requirements_edit_degree_form_submit";
+    
+    
+    
+  } // if form_id == admin_edit_degree_form
+  
+  
+  
+  if ($form_id == "admin_edit_group_form") {
+    
+    // We want our conditional requirements form to go under the "Courses" textarea.
+    
+    if ($form['group_id']['value'] != "new") { 
+    
+      $creqs = conditional_requirements_get_conditional_requirements_for_group($form['group_id']['value'], TRUE);
+      
+      $creq_val = "";
+      // Go through our creqs, and get all of the lines for each semester block.
+      foreach ($creqs as $k => $cur) {
+        $creq_val .= $cur['original_cr_line'] . "\n";
+      }
+    
+    
+      $form['conditional_requirements_' . $form['group_id']['value']] = array(
+        'label' => t('Conditional Requirements:'),
+        'type' => 'textarea',
+        'rows' => 4,
+        'description' => t('This is provided by the Conditional Requirements module.  <a href="http://getflightpath.com/node/1180" target="_blank">See available options & syntax</a> (opens in new window).'),
+        'weight' => 73,
+        'value' => $creq_val,      
+      );
+          
+      // Add an additional validate & submit handler for Conditional Requirements
+      $form['#validate_handlers'][] = "conditional_requirements_edit_group_form_validate";
+      $form['#submit_handlers'][] = "conditional_requirements_edit_group_form_submit";
+    }
+    else {
+      // This is a new form, with no group id yet.
+      $form['conditional_requirements_placeholder'] = array(
+        'label' => t('Conditional Requirements:'),
+        'type' => 'markup',
+        
+        'value' => t('<strong>Please save this group at least once (to establish an ID in the database).  Once you have done this, the Conditional Requirements box will appear.</strong>
+                      <br>This is provided by the Conditional Requirements module.  <a href="http://getflightpath.com/node/1180" target="_blank">See available options & syntax</a> (opens in new window).'),
+        'weight' => 73,
+              
+      );
+            
+    }
+    
+    
+  } // if form_id == admin_edit_group_form
+  
+  
+  
+  
+} // hook_form_alter
+
+
+
+//TODO:  We need to copy conditional requirements when we copy a degree.  See the mside module.  
+
+
+
+
+
+/**
+ * Our validate handler for the edit degree form
+ * 
+ * What we are doing here is checking syntax, and if specified courses exist in the database or not.
+ */
+function conditional_requirements_edit_degree_form_validate($form, &$form_state) {
+  //fpm($form_state);
+  // if term_is_gte(201710) THEN add_course("HIST 101")
+  foreach($form_state['values'] as $key => $val) {
+    // Looking for keys that start with conditional_requirements_
+    if (strstr($key, 'conditional_requirements_')) {
+      $semester_num = str_replace('conditional_requirements_', '', $key);
+      $temp = explode("\n", $val);
+      foreach ($temp as $line) {
+        $line = trim($line);
+        if (!$line) continue;
+        $cresult = conditional_requirements_parse_line($line);
+        if ($cresult && isset($cresult['syntax_errors'])) {
+          foreach ($cresult['syntax_errors'] as $e) {  
+            form_error($key, "Conditional Requirements syntax error, semester block " . ($semester_num + 1)  . " - " . $e . " " . t("This form has <strong>not</strong> been saved."));
+          } 
+        }
+        
+        // If we made it here, then $cresult is valid and good to go.  Let's store it in our form_state, so we
+        // can easily save it later.
+        $form_state['__conditional_requirements_results'][$semester_num][] = $cresult;
+        
+      }
+      
+            
+      
+      //fpm($cresult);
+    }
+  } // foreach
+  
+  
+}
+
+
+
+
+
+
+/**
+ * Our submit handler for the edit degree form
+ */
+function conditional_requirements_edit_degree_form_submit($form, &$form_state) {
+
+  $degree_id = $form_state['values']['degree_id'];
+  // Let's delete what's in our (draft) table for this degree id.
+  db_query("DELETE FROM draft_conditional_requirements WHERE degree_id = ?", $degree_id);
+  
+  
+  foreach ($form_state['__conditional_requirements_results'] as $semester_num => $val) {
+    foreach ($form_state['__conditional_requirements_results'][$semester_num] as $k => $cresults) {
+      if (!$cresults) continue;
+      
+      $action_function = $cresults['action']['function'];
+      
+      
+      $data1 = $data2 = $data3 = $data4 = $data5 = "";
+  
+      
+      
+      if ($action_function == "add_course" || $action_function == "rem_course" || $action_function == "rem_course_if_not_prev_completed") {
+        $data1 = trim(@$cresults['action']['course_id']);    
+        $data2 = trim(@$cresults['action']['requirement_type']);
+        $data3 = trim(@$cresults['action']['min_grade']);
+      }
+      
+          
+      
+      
+      $original_cr_line = "IF " . $cresults['condition']['full'] . " THEN " . $cresults['action']['full'];
+      
+      // We can assume that $cresults is correct, since it passed our validation function.  Let's store it in the database.
+      db_query("INSERT INTO draft_conditional_requirements
+                  (degree_id, group_id, course_id, semester_num, original_cr_line, condition_function, condition_args, action_function, action_args, data1, data2, data3, data4, data5)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", $degree_id, 0, 0, $semester_num, $original_cr_line, $cresults['condition']['function'],
+                                                 $cresults['condition']['args'], $action_function, $cresults['action']['args'],
+                                                 $data1, $data2, $data3, $data4, $data5);
+      
+    }
+  }
+
+
+}
+
+
+
+
+function conditional_requirements_get_conditional_requirements_for_degree($degree_id, $bool_use_draft = TRUE) {
+  $rtn = array();
+  
+  $table_name = "conditional_requirements";
+  if ($bool_use_draft) {
+    $table_name = "draft_" . $table_name;
+  }
+  
+  $res = db_query("SELECT * FROM $table_name WHERE degree_id = ?", $degree_id);
+  while ($cur = db_fetch_array($res)) {
+    $rtn[] = $cur;
+  }  
+  
+  return $rtn;
+}
+
+
+
+function conditional_requirements_get_conditional_requirements_for_group($group_id, $bool_use_draft = TRUE) {
+  $rtn = array();
+  
+  // We need to make sure the group_id does not have any _'s in it, since it will have been saved
+  // that way (without a degree id).
+  $temp = explode("_", $group_id);
+  $group_id = trim($temp[0]);
+  
+  
+  $table_name = "conditional_requirements";
+  if ($bool_use_draft) {
+    $table_name = "draft_" . $table_name;
+  }
+  
+  $res = db_query("SELECT * FROM $table_name WHERE group_id = ?", $group_id);
+  while ($cur = db_fetch_array($res)) {
+    $rtn[] = $cur;
+  }  
+  
+  return $rtn;
+}
+
+
+
+
+
+
+
+/**
+ * Our validate handler for the edit group form
+ * 
+ * What we are doing here is checking syntax, and if specified courses exist in the database or not.
+ */
+function conditional_requirements_edit_group_form_validate($form, &$form_state) {
+  //if term_is_gte(201710) THEN add_course ("ACCT 301");     
+  
+  $group_id = $form_state['values']['group_id'];
+      
+    
+  $val = @$form_state['values']['conditional_requirements_' . $group_id];
+  if ($val) {
+    $temp = explode("\n", $val);
+    foreach ($temp as $line) {
+      $line = trim($line);
+      if (!$line) continue;
+      $cresult = conditional_requirements_parse_line($line, 'group');
+      if ($cresult && isset($cresult['syntax_errors'])) {
+        foreach ($cresult['syntax_errors'] as $e) {  
+          form_error($key, "Conditional Requirements syntax error - " . $e . " " . t("This form has <strong>not</strong> been saved."));
+        } 
+      }
+      
+      // If we made it here, then $cresult is valid and good to go.  Let's store it in our form_state, so we
+      // can easily save it later.
+      $form_state['__conditional_requirements_results'][$group_id][] = $cresult;
+      
+    } // foreach
+    
+  } // if val
+            
+  
+} // ... validate
+
+/**
+ * Our submit handler for the edit group form
+ */
+function conditional_requirements_edit_group_form_submit($form, &$form_state) {
+
+  $group_id = $form_state['values']['group_id'];
+  // Let's delete what's in our (draft) table for this degree id.
+  db_query("DELETE FROM draft_conditional_requirements WHERE group_id = ?", $group_id);
+  
+
+  foreach ($form_state['__conditional_requirements_results'] as $semester_num => $val) {
+    foreach ($form_state['__conditional_requirements_results'][$semester_num] as $k => $cresults) {
+      if (!$cresults) continue;
+      
+      $action_function = $cresults['action']['function'];
+      
+      
+      $data1 = $data2 = $data3 = $data4 = $data5 = "";
+            
+      if ($action_function == "add_course" || $action_function == "rem_course" || $action_function == "rem_course_if_not_prev_completed") {
+        $data1 = trim(@$cresults['action']['course_id']);    
+        $data2 = trim(@$cresults['action']['min_grade']);
+        $data3 = trim(@$cresults['action']['course_repeats']);
+        
+      }
+      
+          
+      
+      
+      $original_cr_line = "IF " . $cresults['condition']['full'] . " THEN " . $cresults['action']['full'];
+      
+      // We can assume that $cresults is correct, since it passed our validation function.  Let's store it in the database.
+      db_query("INSERT INTO draft_conditional_requirements
+                  (degree_id, group_id, course_id, semester_num, original_cr_line, condition_function, condition_args, action_function, action_args, data1, data2, data3, data4, data5)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 0, $group_id, 0, $semester_num, $original_cr_line, $cresults['condition']['function'],
+                                                 $cresults['condition']['args'], $action_function, $cresults['action']['args'],
+                                                 $data1, $data2, $data3, $data4, $data5);
+      
+    }
+  }
+
+  
+} // ...submit
+
+
+
+
+
+/**
+ * This function accepts a string of text (our statement) and parses it,
+ * returning an array of all the relevant information we will need.
+ * 
+ * $context can either == 'degree' or 'group'
+ * 
+ */
+function conditional_requirements_parse_line($statement, $context = "degree") {
+  $rtn = array();
+  
+  //fpm($statement);
+  
+  $statement = trim($statement);
+  if ($statement == "") return FALSE;  // meaning, there is nothing there to interpret.
+  
+    
+  // convert double quotes (") to single quotes (').  Just for standardization.
+  $statement = str_replace('"', "'", $statement);
+  
+  // Remove ; from end, just in case it was placed there by mistake.
+  $statement = rtrim($statement, ";");
+  
+  // convert THEN to uppercase.
+  str_ireplace(" then ", " THEN ", $statement); 
+  
+  // Okay, let's check our syntax.
+  // Make sure we have a "THEN"
+  if (!strstr($statement, " THEN ")) {
+    $rtn['syntax_errors'][] = t("Missing THEN keyword after condition.");
+    return $rtn;
+  }  
+  
+  
+  $temp = explode(" THEN ", $statement, 2);
+  $condition = trim($temp[0]);
+  $action = trim($temp[1]);
+  
+  
+  // CONDITION
+  
+  // Remove the IF from the condition.
+  $condition = substr($condition, 3);
+  
+  // figure out the condition function, and the condition args.
+  $temp = explode("(", $condition);
+  $condition_function = trim($temp[0]);
+  $condition_args = trim(rtrim($temp[1], ')'));
+
+  // Also remove quotes from args
+  $condition_args = str_replace("'", "", $condition_args);
+  
+  
+  $rtn['condition']["full"] = $condition;
+  $rtn['condition']["function"] = strtolower($condition_function);
+  $rtn['condition']["args"] = $condition_args;
+  
+  
+  // ACTION
+  // figure out the action function, and the condition args.
+  $temp = explode("(", $action, 2);
+  $action_function = trim(strtolower($temp[0]));
+  $action_args = trim(rtrim($temp[1], ')'));
+
+  // Also remove quotes from action_args
+  $action_args = str_replace("'", "", $action_args);
+    
+  
+  $rtn['action']["full"] = $action;
+  $rtn['action']["function"] = $action_function;
+  $rtn['action']["args"] = $action_args;
+
+
+  
+  
+  // Okay, now let's make sure that what we entered is valid.  For example,
+  // if the action is "add_course", we need to make sure that the course we are trying
+  // to add is in fact a real course.  We will also store information about the course
+  // in our $rtn.
+  
+  $db = get_global_database_handler();
+  
+  
+  
+  if ($context == 'degree') {
+    ////////////////////////
+    // ADD COURSE or REM COURSE for a degree
+    // Note:  for rem_course, requirement type and min grade are ignored in the end. 
+    if ($action_function == "add_course" || $action_function == "rem_course" || $action_function == "rem_course_if_not_prev_completed") {
+      
+      // Take out extra whitespace between tokens.
+      $action_args = fp_reduce_whitespace($action_args);
+  
+      // What courses should have their type overwritten as "x"?
+      $ignore_courses = csv_to_array(variable_get("ignore_courses_from_hour_counts", ""));
+  
+      $tokens = explode(" ", $action_args);
+      $subject_id = trim($tokens[0]);
+      $course_num = trim($tokens[1]);
+      $requirement_type = strtolower(trim(@$tokens[2]));
+  
+      if ($requirement_type == "") { 
+        // major type by default.
+        $requirement_type = "m";
+      }
+  
+      // If this course is in our ignore list, override it's type
+      // to be 'x'
+      if (in_array("$subject_id $course_num", $ignore_courses)) {
+        $requirement_type = "x";
+      }
+      
+      $min_grade = strtoupper(@$tokens[3]);
+  
+      if (strstr($requirement_type, "(")) {
+        // This means there was no requirement_type specified, so it's "m",
+        // and a min_grade was found in its place.
+        $min_grade = strtoupper($requirement_type);
+        $requirement_type = "m";
+      }
+  
+      $min_grade = str_replace("(","",$min_grade);
+      $min_grade = str_replace(")","",$min_grade);        
+      $min_grade = trim($min_grade);
+      
+      // Now let's find out if the course exists or not...
+      if ($course_id = $db->get_course_id($subject_id, $course_num, "", true))  // don't care about catalog year.
+      {
+        $rtn['action']['course_id'] = $course_id;
+        $rtn['action']['requirement_type'] = $requirement_type;
+        $rtn['action']['min_grade'] = $min_grade;
+      } 
+      else {
+        // The course_id could not be found!
+        $rtn['syntax_errors'][] = t("The course specified as %course could not be found.  Please check spelling and try again.", array("%course" => "$subject_id $course_num"));
+      }    
+      
+    } // if action_function == add_course
+  } // if context == degree
+  
+
+  
+  if ($context == 'group') {
+    ////////////////////////
+    // ADD COURSE or REM COURSE for a group
+    // Note:  for rem_course, specified repeats is ignored 
+    if ($action_function == "add_course" || $action_function == "rem_course" || $action_function == "rem_course_if_not_prev_completed") {
+      
+      // Take out extra whitespace between tokens.
+      $action_args = fp_reduce_whitespace($action_args);
+  
+  
+      $tokens = explode(" ", $action_args);
+
+      $subject_id = @trim($tokens[0]);
+      $course_num = @trim($tokens[1]);
+      $min_grade = @trim($tokens[2]);
+      $course_repeats = @trim($tokens[3]);
+
+      if (strstr($min_grade, "[")) {
+        // This is actually a specified repeat, not a min grade.
+        $course_repeats = $min_grade;
+        $min_grade = "";
+      }
+
+      $min_grade = str_replace("(","",$min_grade);
+      $min_grade = strtoupper(str_replace(")","",$min_grade));
+
+      $course_repeats = str_replace("[","",$course_repeats);
+      $course_repeats = str_replace("]","",$course_repeats);
+      $course_repeats--;
+      if ($course_repeats < 0) { $course_repeats = 0; }
+
+      // If the subject_id had a _A_ in it, convert this back
+      // to an ampersand.
+      $subject_id = str_replace("_A_", "&", $subject_id);
+
+      
+      if ($course_id = $db->get_course_id($subject_id, $course_num, "", true)) {
+        $rtn['action']['course_id'] = $course_id;
+        $rtn['action']['min_grade'] = $min_grade;
+        $rtn['action']['course_repeats'] = $course_repeats;        
+      } 
+      else {
+        // The course_id could not be found!
+        $rtn['syntax_errors'][] = t("The course specified as %course could not be found.  Please check spelling and try again.", array("%course" => "$subject_id $course_num"));
+      }
+    
+    } // if action_function == add_course
+  } // if context == group
+    
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+    
+  return $rtn;
+} // .. parse_line
+
+
+
+
+/**
+ * Implements hook_apply_draft_changes
+ * 
+ * This runs when the user "applies draft changes".  We want to
+ * copy from our draft_ table to our production table.
+ */
+function conditional_requirements_apply_draft_changes() {
+    
+  
+  $table_name = "conditional_requirements";
+  $draft_table_name = "draft_$table_name";
+  
+  // First, truncate existing...
+  $query = "truncate table $table_name";
+  $res = db_query($query);
+  
+  // Now, copy in draft changes...
+  $query = "INSERT INTO $table_name
+          SELECT * FROM $draft_table_name ";
+  $res = db_query($query);
+  
+} // hook_apply_draft_changes
+
+
+
+
+
+/**
+ * Implements hook_group_load
+ * 
+ * When we load a group, we need to see if there are any conditional requirements for it, and apply them if so.
+ * 
+ */
+function conditional_requirements_group_load(&$group) {
+  global $student;
+  
+  
+  // We do NOT want to do this on the admin/groups/edit-group screen!  Otherwise we will wind up creating confusion.
+  if (arg(0) == "admin" && arg(1) == "groups" && arg(2) == "edit-group") {
+    return;  // return harmlessly
+  }
+        
+  
+  
+  $creqs = conditional_requirements_get_conditional_requirements_for_group($group->group_id);
+  if (!$creqs || count($creqs) == 0) return; // nothing there, return harmlessly. 
+  
+  
+  // For groups, there aren't really "semesters", but since the data is still saved this way,
+  // we will keep the terminology to make our lives easier.  
+  $creqs_by_semester = array();
+  // Go through our creqs, and get for each item.
+  foreach ($creqs as $k => $cur) {
+    @$creqs_by_semester[$cur['semester_num']][] = $cur;
+  }
+    
+  
+  $db = get_global_database_handler();    
+  $current_term = variable_get('conditional_requirements_current_term', '2000F');  
+
+  foreach ($creqs_by_semester as $sem => $val) {
+    foreach ($creqs_by_semester[$sem] as $k => $reqs) {
+      
+      $bool_proceed = FALSE;
+      $conditional_term_check = "";
+      // First, make sure that the condition has actually happened.  If it has not,
+      // then we continue.    
+      if ($reqs['condition_function'] == 'term_is_gte') {
+        $args = trim($reqs['condition_args']);
+        $conditional_term_check = $args;
+        // Let's see if the current conditional requirements term is >= to what is in $args.    
+        if ($current_term >= $args) {
+          // Yes, we may proceed!
+          $bool_proceed = TRUE;
+        }
+        
+      } // if condition function == term_is_gte
+      
+      /////////////////////////////////    
+      /////////////////////////////////    
+      /////////////////////////////////    
+  
+      if ($bool_proceed == FALSE) continue;  // do not proceed, so continue and skip this req.
+      
+      /////////////////////////////////
+      /////////////////////////////////
+      /////////////////////////////////
+      
+      $id = mt_rand(10000, 99999);      
+      
+      // If we have an add_course function, then add the appropriate course here.
+      if ($reqs['action_function'] == "add_course") {
+        $course_id = trim($reqs['data1']);
+        $min_grade = trim(strtoupper($reqs['data2']));
+        $course_repeats = trim(strtoupper($reqs['data3']));
+              
+        for ($t = 0; $t <= $course_repeats; $t++)
+        { // Add in the specified repeats for this group...
+          // This will usually only go through the loop once.
+  
+          $use_id = $id . "_rep_$t";
+  
+          $course_c = new Course();
+          $course_c->bool_use_draft = $group->bool_use_draft;
+          $course_c->course_id = $course_id;
+          $course_c->db_group_requirement_id = $use_id;
+          $course_c->db = $db;
+          $course_c->catalog_year = $group->catalog_year;
+          $course_c->assigned_to_group_id = $group->group_id;
+          $course_c->assigned_to_semester_num = $group->assigned_to_semester_num;
+          
+  
+          $course_c->specified_repeats = $course_repeats;
+          if ($course_repeats > 0)
+          {
+            $course_c->bool_specified_repeat = true;
+          }
+  
+          $course_c->min_grade = trim(strtoupper($min_grade));
+          if ($course_c->min_grade == "")
+          { // By default, all courses have a
+            // min grade requirement of D.
+            $course_c->min_grade = "D";
+          }
+  
+  
+          $group->list_courses->add($course_c);
+        } // for t <= cur['course_repeats']
+        
+      } // if add_course
+                    
+      if ($reqs['action_function'] == 'rem_course') {
+        $course_id = trim($reqs['data1']);
+        $min_grade = trim(strtoupper($reqs['data2']));
+        $course_repeats = trim(strtoupper($reqs['data3']));
+        
+        $group->list_courses->remove_course_with_course_id($course_id, $course_repeats + 1);  // only remove the the number of course repeats specified.
+      } // if rem_course
+    
+      
+
+      if ($reqs['action_function'] == 'rem_course_if_not_prev_completed' && $conditional_term_check != "") {
+        // Only remove this course if the student hasn't completed it previously, before the term we are checking.
+        $course_id = trim($reqs['data1']);
+        
+        $course = new Course();
+        $course->course_id = $course_id;        
+        $bool_remove = TRUE;
+        
+        if ($student) {
+          $found_course = $student->list_courses_taken->find_best_match($course);          
+          if ($course_id != 0 && $found_course && $found_course->is_completed()) {
+            
+            // Okay, let's find out WHEN we took it.  If it was BEFORE our $conditional_term_check, then we will NOT remove it.
+            if ($found_course->term_id < $conditional_term_check) {
+              $bool_remove = FALSE;
+            }
+          }
+        }
+              
+        if ($bool_remove) {
+          $group->list_courses->remove_course_with_course_id($course_id, $course_repeats + 1);  // only remove the the number of course repeats specified.
+        }
+      } // if rem_course_if_not_prev_completed
+    
+                
+      
+    
+    } // foreach $creqs_by_semester as $sem => $val
+    
+  } // foreach ($creqs_by_semester[$sem] as $k => $reqs)  
+  
+  
+  
+  
+  
+} // ... group_load
+
+
+
+
+
+
+/**
+ * implements hook_degree_plan_load
+ * 
+ * When we load a degree plan, we need to see if there are any conditional requirements for it, and apply them if so.
+ */
+function conditional_requirements_degree_plan_load(&$degree, $student = NULL) {
+  global $student;        
+      
+  // We do NOT want to do this on the admin/degrees/edit-degree screen!  Otherwise we will wind up creating confusion.
+  if (arg(0) == "admin" && arg(1) == "degrees" && arg(2) == "edit-degree") {
+    return;  // return harmlessly
+  }
+        
+  
+  $creqs = conditional_requirements_get_conditional_requirements_for_degree($degree->degree_id);
+  if (!$creqs || count($creqs) == 0) return; // nothing there, return harmlessly. 
+  
+    
+  $creqs_by_semester = array();
+  // Go through our creqs, and get for each semester block.
+  foreach ($creqs as $k => $cur) {
+    @$creqs_by_semester[$cur['semester_num']][] = $cur;
+  }
+    
+  
+  $db = get_global_database_handler();    
+  $current_term = variable_get('conditional_requirements_current_term', '2000F');  
+  
+  
+  foreach ($creqs_by_semester as $sem => $val) {
+    foreach ($creqs_by_semester[$sem] as $k => $reqs) {
+      $semester = $degree->get_semester($sem);
+      if (!$semester) continue;  // couldn't find it.  Some issue, so skip it.
+      
+      $bool_proceed = FALSE;
+      $conditional_term_check = "";
+      // First, make sure that the condition has actually happened.  If it has not,
+      // then we continue.    
+      if ($reqs['condition_function'] == 'term_is_gte') {
+        $args = trim($reqs['condition_args']);
+        $conditional_term_check = $args;
+        // Let's see if the current conditional requirements term is >= to what is in $args.    
+        if ($current_term >= $args) {
+          // Yes, we may proceed!
+          $bool_proceed = TRUE;
+        }
+        
+      } // if condition function == term_is_gte
+      
+      /////////////////////////////////    
+      /////////////////////////////////    
+      /////////////////////////////////    
+  
+      if ($bool_proceed == FALSE) continue;  // do not proceed, so continue and skip this req.
+      
+      /////////////////////////////////
+      /////////////////////////////////
+      /////////////////////////////////
+      
+      
+      // If we have an add_course function, then add the appropriate course here.
+      if ($reqs['action_function'] == "add_course") {
+        $course_id = trim($reqs['data1']);  
+        $requirement_type = trim($reqs['data2']);  
+        $min_grade = trim(strtoupper($reqs['data3']));
+        
+        $course = new Course($course_id, FALSE, $db, FALSE, $degree->catalog_year, $degree->bool_use_draft);
+        $course->assigned_to_semester_num = $sem;      
+        $course->min_grade = trim(strtoupper($min_grade));
+  
+        if ($course->min_grade == "")
+        { // By default, all courses have a
+          // min grade requirement of D.
+          $course->min_grade = "D";
+        }
+        
+        $course->requirement_type = $requirement_type;
+  
+        // Set which degree_id this course is a requirement of (for multiple degrees)
+        $course->req_by_degree_id = $degree->degree_id;
+          
+        // Finally, add it to our semester of courses.  
+        $semester->list_courses->add($course);      
+              
+      } // if add_course
+  
+          
+      if ($reqs['action_function'] == 'rem_course') {
+        $course_id = trim($reqs['data1']);      
+        $semester->list_courses->remove_course_with_course_id($course_id, 1);  // only remove 1 occurance of it.
+      } // if rem_course
+    
+    
+
+      if ($reqs['action_function'] == 'rem_course_if_not_prev_completed' && $conditional_term_check != "") {
+        // Only remove this course if the student hasn't completed it previously, before the term we are checking.
+        $course_id = trim($reqs['data1']);
+        
+        $course = new Course();
+        $course->course_id = $course_id;        
+        $bool_remove = TRUE;
+        
+        if ($student) {
+          $found_course = $student->list_courses_taken->find_best_match($course);          
+          if ($course_id != 0 && $found_course && $found_course->is_completed()) {
+            
+            // Okay, let's find out WHEN we took it.  If it was BEFORE our $conditional_term_check, then we will NOT remove it.
+            if ($found_course->term_id < $conditional_term_check) {
+              $bool_remove = FALSE;
+            }
+          }
+        }
+              
+        if ($bool_remove) {
+          $semester->list_courses->remove_course_with_course_id($course_id, 1);  // only remove 1 occurance of it.
+        }
+      } // if rem_course_if_not_prev_completed
+    
+          
+    
+    } // foreach $creqs_by_semester as $sem => $val
+    
+  } // foreach ($creqs_by_semester[$sem] as $k => $reqs)
+  
+  
+} // hook_degree_plan_load
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

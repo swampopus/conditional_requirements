@@ -1,0 +1,87 @@
+<?php
+/**
+ * @file
+ * 
+ * This is the install file for the CR module.  Here, we will handle installing the tables
+ * associated with this module.
+*/
+
+
+/**
+ * Implements hook_install
+ * 
+ * This function will create our tables.
+ * 
+ */
+function conditional_requirements_install() {
+  
+
+  $q = "
+        CREATE TABLE `conditional_requirements` (
+          `cid` int(10) unsigned NOT NULL AUTO_INCREMENT,
+          `degree_id` int(10) unsigned DEFAULT '0',
+          `semester_num` int(10) unsigned DEFAULT '0',
+          `group_id` int(11) DEFAULT '0',
+          `original_cr_line` text,
+          `condition_function` varchar(255) DEFAULT '',
+          `condition_args` text,
+          `action_function` varchar(255) DEFAULT '',
+          `action_args` text,
+          `data1` varchar(255) DEFAULT '',
+          `data2` varchar(255) DEFAULT '',
+          `data3` varchar(255) DEFAULT '',
+          `data4` varchar(255) DEFAULT NULL,
+          `data5` varchar(255) DEFAULT NULL,
+          PRIMARY KEY (`cid`),
+          KEY `degree_id` (`degree_id`),
+          KEY `group_id` (`group_id`),
+          KEY `data1` (`data1`),
+          KEY `data2` (`data2`),
+          KEY `data3` (`data3`),
+          KEY `condition` (`condition_function`),
+          KEY `data4` (`data4`),
+          KEY `data5` (`data5`),
+          KEY `action` (`action_function`)
+        );   ";
+
+  
+  db_query($q);
+  
+  
+
+  $q = "
+        CREATE TABLE `draft_conditional_requirements` (
+          `cid` int(10) unsigned NOT NULL AUTO_INCREMENT,
+          `degree_id` int(10) unsigned DEFAULT '0',
+          `semester_num` int(10) unsigned DEFAULT '0',
+          `group_id` int(11) DEFAULT '0',
+          `original_cr_line` text,
+          `condition_function` varchar(255) DEFAULT '',
+          `condition_args` text,
+          `action_function` varchar(255) DEFAULT '',
+          `action_args` text,
+          `data1` varchar(255) DEFAULT '',
+          `data2` varchar(255) DEFAULT '',
+          `data3` varchar(255) DEFAULT '',
+          `data4` varchar(255) DEFAULT NULL,
+          `data5` varchar(255) DEFAULT NULL,
+          PRIMARY KEY (`cid`),
+          KEY `degree_id` (`degree_id`),
+          KEY `group_id` (`group_id`),
+          KEY `data1` (`data1`),
+          KEY `data2` (`data2`),
+          KEY `data3` (`data3`),
+          KEY `condition` (`condition_function`),
+          KEY `data4` (`data4`),
+          KEY `data5` (`data5`),
+          KEY `action` (`action_function`)
+        );   ";
+
+         
+  db_query($q);    
+  
+  
+  
+  
+  
+} // hook_install

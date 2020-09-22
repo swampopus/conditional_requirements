@@ -1,0 +1,14 @@
+Conditional Requirements
+============================
+
+2018-01-18
+  Added new command:
+    rem_course_if_not_prev_completed().  See online help for more information:
+	http://getflightpath.com/node/1180
+
+2017-12-25
+  Ready for "alpha" release of module.  Adding/removing courses to degrees & groups
+  is working.
+
+2017-09-23
+  Initial creation of Conditional Requirements module.

@@ -1,0 +1,4 @@
+name = Conditional Requirements
+description = Allows degrees and groups to turn on or off certain requirements based on a condition (like current term)
+core = 5.x 
+schema = 1
